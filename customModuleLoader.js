@@ -1,20 +1,3 @@
-/**
- * 1. 获取 scripts 标签，管理 引入顺序
- * 2. 获取 data-main ，引入文件入口
- * 3. require 以及 define 都是全局函数
- *
- * requirejs 中的 require 和 define 有点区别
- * define 有定义一个模块，可以在回调函数中 return 数据方法供其他模块使用
- * require 只是加载依赖并执行，并没有 return 出去数据方法
- */
-
-// 先不考虑循环依赖等特殊
-// 只考虑加载本地文件，看作所有代码串型执行
-// 执行逻辑就是先把当前代码执行完成之后，才会再执行新插入的 script 标签
-//
-
-// 
-
 (function (global) {
   function CustomLoader() {}
 
@@ -28,9 +11,10 @@
   // 初始化时候设置 publicPath 以及加载入口文件
   CustomLoader.init = function () {
     var scriptDom = document.getElementsByTagName("script")[0];
-    console.log(scriptDom.dataset.main);
+    // 获取 scripts/main.js 中的 scripts
     publicPath = scriptDom.dataset.main.split("/").slice(0, -1).join("/");
 
+    // 获取 scripts/main.js 中的 main
     var inputFile = scriptDom.dataset.main
       .split("/")
       .slice(-1)[0]
@@ -42,9 +26,8 @@
     return document.currentScript.getAttribute("src");
   };
 
-  // 加载 public 下的 JS 文件
   CustomLoader.loadJS = function (fileName) {
-    const src = publicPath + "/" + fileName + ".js";
+    const src = CustomLoader.genPath(fileName);
 
     // 已经加载过了
     if (module[src]) {
@@ -90,7 +73,6 @@
 
   // 检测当前 loading 队列里的是否该执行 callback
   CustomLoader.checkLoading = function () {
-    // 自下而上
     for (let i = 0; i < loadingQueue.length; i++) {
       var item = loadingQueue[i];
       if (CustomLoader.checkDepsReady(item)) {
@@ -125,7 +107,6 @@
     var id = CustomLoader.getCurrentSrc();
     module[id] = {
       id,
-      //  加载状态，1 为 loading 、 2 为加载成功
       state: 1,
       deps,
       callback,
