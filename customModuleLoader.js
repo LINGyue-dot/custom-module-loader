@@ -11,11 +11,10 @@
 // 先不考虑循环依赖等特殊
 // 只考虑加载本地文件，看作所有代码串型执行
 // 执行逻辑就是先把当前代码执行完成之后，才会再执行新插入的 script 标签
+//
+
 // 
 
-/**
- * 1. 如何获取 basePublic 路径信息？
- */
 (function (global) {
   function CustomLoader() {}
 
@@ -23,6 +22,8 @@
 
   // 模块信息
   var module = {};
+  // loading 队列，用于保证调用时机
+  var loadingQueue = [];
 
   // 初始化时候设置 publicPath 以及加载入口文件
   CustomLoader.init = function () {
@@ -34,7 +35,7 @@
       .split("/")
       .slice(-1)[0]
       .replace(".js", "");
-    CustomLoader.loadPublicJs(inputFile, null);
+    CustomLoader.loadJS(inputFile, null);
   };
 
   CustomLoader.getCurrentSrc = function () {
@@ -42,11 +43,12 @@
   };
 
   // 加载 public 下的 JS 文件
-  CustomLoader.loadPublicJs = function (fileName, callback) {
+  CustomLoader.loadJS = function (fileName) {
     const src = publicPath + "/" + fileName + ".js";
+
     // 已经加载过了
     if (module[src]) {
-      callback();
+      CustomLoader.checkLoading();
       return;
     }
 
@@ -56,7 +58,7 @@
     scriptDom.type = "text/javascript";
 
     scriptDom.onload = function () {
-      callback && callback();
+      CustomLoader.checkLoading();
     };
     scriptDom.onerror = function (e) {
       console.log(e);
@@ -70,7 +72,7 @@
     var id = CustomLoader.getCurrentSrc();
     module[id] = {
       id,
-      //  加载状态，1 为 loading 2 为加载成功
+      //  加载状态，1 为 loading 、 2 为加载成功
       state: 1,
       deps,
       callback,
@@ -79,58 +81,63 @@
     if (deps.length === 0) {
       module[id].exports = callback();
       module[id].state = 2;
-      return;
     }
-
-    var len = 0;
+    loadingQueue.unshift(module[id]);
     deps.map((dep) => {
-      CustomLoader.loadPublicJs(dep, function () {
-        len++;
-        if (len === deps.length) {
-          // 完成所有加载
-          var params = deps.map(
-            (dep) => module[publicPath + "/" + dep + ".js"].exports
-          );
-          module[id].exports = callback(...params);
-          module[id].state = 2;
-        }
-      });
+      CustomLoader.loadJS(dep);
     });
+  };
+
+  // 检测当前 loading 队列里的是否该执行 callback
+  CustomLoader.checkLoading = function () {
+    // 自下而上
+    for (let i = 0; i < loadingQueue.length; i++) {
+      var item = loadingQueue[i];
+      if (CustomLoader.checkDepsReady(item)) {
+        // 如果依赖都已经加载完成了
+        item.state = 2;
+        item.exports = item.callback(
+          ...item.deps.map((dep) => module[CustomLoader.genPath(dep)].exports)
+        );
+        loadingQueue.splice(i, 1);
+        i--;
+        CustomLoader.checkLoading();
+      }
+    }
+  };
+
+  CustomLoader.checkDepsReady = function (item) {
+    return (
+      item.deps.length === 0 ||
+      item.deps.every(
+        (dep) =>
+          module[CustomLoader.genPath(dep)] &&
+          module[CustomLoader.genPath(dep)].state === 2
+      )
+    );
+  };
+
+  CustomLoader.genPath = function (fileName) {
+    return publicPath + "/" + fileName + ".js";
   };
 
   CustomLoader.require = function (deps, callback) {
     var id = CustomLoader.getCurrentSrc();
     module[id] = {
       id,
-      //  加载状态，1 为 loading 2 为加载成功
+      //  加载状态，1 为 loading 、 2 为加载成功
       state: 1,
       deps,
       callback,
       exports: null,
     };
     if (deps.length === 0) {
-      callback();
+      module[id].exports = null;
       module[id].state = 2;
-      return;
     }
-
-    var len = 0;
+    loadingQueue.unshift(module[id]);
     deps.map((dep) => {
-      CustomLoader.loadPublicJs(dep, function () {
-
-        len++;
-        if (len === deps.length) {
-          // 完成所有加载
-          var params = deps.map(
-            (d) => module[publicPath + "/" + d + ".js"].exports
-          );
-          // 问题就是：cjs 执行后就会被调用，而不是 a.js b.js 完成之后调用
-          // 如何处理依赖递归问题
-          console.log(JSON.stringify(module))
-          callback(...params);
-          module[id].state = 2;
-        }
-      });
+      CustomLoader.loadJS(dep);
     });
   };
 
